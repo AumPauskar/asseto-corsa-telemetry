@@ -7,50 +7,80 @@ import math
 HOST = "127.0.0.1"
 PORT = 9996
 
-def create_physics_packet(t):
+def get_simulated_packet(t):
     """
-    Creates a valid 328-byte Assetto Corsa UDP packet with simulated data.
-    't' is time, used to generate sine waves for movement.
+    Generates a 328-byte packet with data matching your client's unpacking logic.
     """
-    # Create an empty buffer of 328 bytes
     packet = bytearray(328)
-
-    # --- SIMULATION LOGIC ---
-    # Simulate a car accelerating from 0 to 200 kmh and braking
-    cycle = t % 10.0 # 10 second loop
     
-    if cycle < 5.0: # Accelerating
-        speed = (cycle / 5.0) * 200.0
+    # --- SIMULATION LOOP (10 Seconds) ---
+    cycle = t % 10.0
+    
+    # 1. Input Simulation
+    # 0-4s: Accelerate | 4-5s: Coast | 5-9s: Brake | 9-10s: Idle
+    if cycle < 4.0:
         gas = 1.0
         brake = 0.0
-        rpm = 1000 + (cycle * 1200) # Fake RPM rise
-    else: # Braking
-        speed = 200.0 - ((cycle - 5.0) / 5.0 * 200.0)
+        rpm = 1000 + (cycle * 1500) # Rev up to 7000
+        speed = cycle * 50.0 # 0 to 200 kmh
+        g_long = 0.8 # G-Force pushing back
+    elif cycle < 5.0:
         gas = 0.0
-        brake = 0.8
-        rpm = 6000 - ((cycle - 5.0) * 1000)
+        brake = 0.0
+        rpm = 6000
+        speed = 200.0
+        g_long = 0.0
+    elif cycle < 9.0:
+        gas = 0.0
+        brake = 0.8 # Hard braking
+        rpm = 6000 - ((cycle - 5.0) * 1200)
+        speed = 200.0 - ((cycle - 5.0) * 50.0)
+        g_long = -1.2 # G-Force pushing forward
+    else:
+        gas = 0.0
+        brake = 0.0
+        rpm = 850
+        speed = 0.0
+        g_long = 0.0
 
-    # Automatic Gear Shifting simulation (0=R, 1=N, 2=1st...)
+    # 2. Steering & Lateral G Simulation (Sine wave)
+    steer = math.sin(t) # -1.0 to 1.0
+    g_lat = steer * 1.5 # 1.5 Gs in corners
+    g_vert = 1.0 + (math.sin(t * 10) * 0.05) # Simulated bumps ~1G
+
+    # 3. Gear Logic
     if speed < 1: gear = 1 # Neutral
     elif speed < 60: gear = 2 # 1st
     elif speed < 120: gear = 3 # 2nd
     else: gear = 4 # 3rd
 
+    # 4. Clutch Logic
+    # Your client does: clutch = 1.0 - raw_clutch
+    # So if we want clutch NOT pressed (0.0 on screen), we send 1.0 raw.
+    raw_clutch = 1.0 
+
     # --- PACKING DATA (Little Endian) ---
     
-    # 1. Speed (Offset 8, Float)
+    # Speed (Offset 8)
     struct.pack_into('<f', packet, 8, speed)
 
-    # 2. Gas (Offset 56, Float)
+    # G-Forces (Offsets 24, 28, 32)
+    struct.pack_into('<f', packet, 24, g_lat)  # Lat
+    struct.pack_into('<f', packet, 28, g_vert) # Vert
+    struct.pack_into('<f', packet, 32, g_long) # Long
+
+    # Inputs (Offsets 56, 60, 64)
     struct.pack_into('<f', packet, 56, gas)
-
-    # 3. Brake (Offset 60, Float)
     struct.pack_into('<f', packet, 60, brake)
+    struct.pack_into('<f', packet, 64, raw_clutch)
 
-    # 4. RPM (Offset 68, Float)
+    # RPM (Offset 68)
     struct.pack_into('<f', packet, 68, rpm)
 
-    # 5. Gear (Offset 76, Int)
+    # Steer (Offset 72)
+    struct.pack_into('<f', packet, 72, steer)
+
+    # Gear (Offset 76)
     struct.pack_into('<i', packet, 76, gear)
 
     return packet
@@ -58,8 +88,8 @@ def create_physics_packet(t):
 def run_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((HOST, PORT))
-    print(f"Server (Fake AC) listening on {HOST}:{PORT}")
-    print("Waiting for client handshake...")
+    print(f"MOCK SERVER listening on {HOST}:{PORT}")
+    print("Run your client script now...")
 
     client_addr = None
     active = False
@@ -67,46 +97,38 @@ def run_server():
 
     try:
         while True:
-            # Non-blocking receive for new commands
-            sock.settimeout(0.016) # ~60Hz tick
+            # Check for incoming commands (Handshake/Subscribe)
+            sock.settimeout(0.01)
             try:
                 data, addr = sock.recvfrom(4096)
                 
-                # Unpack command (Handshake is 3 ints: id, ver, op)
-                if len(data) == 12:
+                if len(data) == 12: # Standard Command Packet
                     _, _, op_id = struct.unpack('<iii', data)
                     
                     if op_id == 0: # Handshake
-                        print(f"Handshake received from {addr}")
-                        # Respond with Car Name (UTF-16)
-                        # We send 100 chars (200 bytes) of UTF-16 text
-                        car_name = "SIMULATED_FERRARI_GT3".encode('utf-16')[2:] # [2:] removes BOM
-                        padding = b'\x00' * (4096 - len(car_name)) # Fill rest of packet
+                        print(f"-> Handshake from {addr}")
+                        # Send Car Name "TEST_CAR_GT3"
+                        car_name = "TEST_CAR_GT3".encode('utf-16')[2:]
+                        padding = b'\x00' * (4096 - len(car_name))
                         sock.sendto(car_name + padding, addr)
                         
-                    elif op_id == 1: # Subscribe
-                        print(f"Client {addr} subscribed to updates.")
+                    elif op_id == 1: # Subscribe Update
+                        print(f"-> Client {addr} subscribed to TELEMETRY.")
                         client_addr = addr
                         active = True
-
-                    elif op_id == 3: # Dismiss
-                        print(f"Client {addr} disconnected.")
-                        active = False
-                        client_addr = None
-
+                        
+                    elif op_id == 2: # Subscribe Spot (Lap)
+                        print(f"-> Client {addr} subscribed to LAP INFO.")
+                        
             except socket.timeout:
-                pass # No incoming command, proceed to send data if active
+                pass
 
-            # Send Telemetry Stream if active
+            # Send Physics Stream
             if active and client_addr:
                 t = time.time() - start_time
-                packet = create_physics_packet(t)
+                packet = get_simulated_packet(t)
                 sock.sendto(packet, client_addr)
-                
-                # Simulate 60Hz update rate
-                # (The socket timeout above handles most of the delay, 
-                # but this prevents CPU spanning if no timeout occurs)
-                # time.sleep(0.001) 
+                time.sleep(0.02) # ~50Hz update rate
 
     except KeyboardInterrupt:
         print("\nStopping Server.")
