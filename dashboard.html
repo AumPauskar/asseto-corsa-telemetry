@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AC Telemetry Dashboard</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+            width: 800px;
+            background: #1e1e1e;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* Speed & Gear Section */
+        .center-dial {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .gear {
+            font-size: 120px;
+            font-weight: bold;
+            color: #ffeb3b; /* Yellow */
+            line-height: 1;
+        }
+        .speed-box {
+            font-size: 40px;
+            font-weight: bold;
+        }
+        .unit { font-size: 16px; color: #888; }
+
+        /* RPM Bar */
+        .rpm-container {
+            grid-column: 1 / -1;
+            background: #333;
+            height: 30px;
+            border-radius: 5px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 10px;
+        }
+        .rpm-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4caf50 60%, #ffeb3b 80%, #f44336 100%);
+            transition: width 0.05s linear;
+        }
+        .rpm-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            top: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        /* Pedals */
+        .pedal-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .pedal-label { font-size: 14px; color: #aaa; margin-bottom: 2px; }
+        .bar-bg {
+            background: #333;
+            height: 20px;
+            width: 100%;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.05s linear; }
+        
+        #gas-bar { background-color: #4caf50; } /* Green */
+        #brake-bar { background-color: #f44336; } /* Red */
+        #clutch-bar { background-color: #2196f3; } /* Blue */
+
+        /* G-Force */
+        .g-force {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 10px;
+        }
+        .g-val { font-size: 20px; font-weight: bold; margin: 5px 0; }
+        .label { color: #888; font-size: 12px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+        <div class="rpm-container">
+            <div id="rpm-fill" class="rpm-bar"></div>
+            <div id="rpm-text" class="rpm-text">0 RPM</div>
+        </div>
+
+        <div class="pedal-group">
+            <div>
+                <div class="pedal-label">THROTTLE</div>
+                <div class="bar-bg"><div id="gas-bar" class="bar-fill"></div></div>
+            </div>
+            <div>
+                <div class="pedal-label">BRAKE</div>
+                <div class="bar-bg"><div id="brake-bar" class="bar-fill"></div></div>
+            </div>
+            <div>
+                <div class="pedal-label">CLUTCH</div>
+                <div class="bar-bg"><div id="clutch-bar" class="bar-fill"></div></div>
+            </div>
+        </div>
+
+        <div class="center-dial">
+            <div id="gear" class="gear">N</div>
+            <div class="speed-box">
+                <span id="speed">0</span>
+                <span class="unit">KMH</span>
+            </div>
+        </div>
+
+        <div class="g-force">
+            <div class="label">LATERAL G</div>
+            <div id="g-lat" class="g-val">0.00</div>
+            <br>
+            <div class="label">LONGITUDINAL G</div>
+            <div id="g-long" class="g-val">0.00</div>
+            <br>
+            <div class="label">STEERING</div>
+            <div id="steer" class="g-val">0.00</div>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:5678");
+
+        ws.onopen = () => {
+            console.log("Connected to Python Bridge");
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            // Update Text Elements
+            document.getElementById("speed").innerText = data.speed;
+            document.getElementById("gear").innerText = data.gear;
+            document.getElementById("rpm-text").innerText = data.rpm + " RPM";
+            document.getElementById("g-lat").innerText = data.g_lat;
+            document.getElementById("g-long").innerText = data.g_long;
+            document.getElementById("steer").innerText = data.steer;
+
+            // Update Bars (Width %)
+            // RPM max assumed 8000 for visuals (can be dynamic if needed)
+            let rpmPct = (data.rpm / 8000) * 100;
+            if (rpmPct > 100) rpmPct = 100;
+            document.getElementById("rpm-fill").style.width = rpmPct + "%";
+
+            // Pedals are 0.0 to 1.0, so multiply by 100 for percentage
+            document.getElementById("gas-bar").style.width = (data.gas * 100) + "%";
+            document.getElementById("brake-bar").style.width = (data.brake * 100) + "%";
+            document.getElementById("clutch-bar").style.width = (data.clutch * 100) + "%";
+        };
+
+        ws.onclose = () => {
+            console.log("Disconnected");
+            document.getElementById("gear").innerText = "-";
+        };
+    </script>
+
+</body>
+</html>
