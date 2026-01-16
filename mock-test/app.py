@@ -18,12 +18,6 @@ def get_gear_char(raw_gear):
 
 def start_telemetry():
     print(f"Connecting to {AC_IP}:{AC_PORT}...")
-
-    # State variables for Lap Data (since it comes in a different packet)
-    current_lap_time = 0.0
-    last_lap_time = 0.0
-    lap_count = 0
-
     try:
         # 1. Handshake
         sock.sendto(struct.pack('<iii', 1, 1, 0), (AC_IP, AC_PORT))
@@ -86,9 +80,6 @@ def start_telemetry():
  [ G-FORCE ]
   Lat: {g_lat:5.2f} G  |  Vert: {g_vert:5.2f} G  |  Long: {g_long:5.2f} G
 
- [ TIMING (Updates on Lap Line) ]
-  Last Lap: {last_lap_time // 60:.0f}:{last_lap_time % 60:05.2f}
-  Laps:     {lap_count}
 ============================================================
 """
                 sys.stdout.write(output)
